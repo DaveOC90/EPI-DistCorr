@@ -54,10 +54,51 @@ prepare.inputs.output_type = "NIFTI_GZ"
 prepare.inputs.delta_TE = 2.46
 
 # Co-Register EPI and Correct field inhomogeniety distortions
-epireg = pe.Node(interface=fsl.epi.EpiReg(), name='epireg')
-epireg.inputs.echospacing=0.00046
-epireg.inputs.pedir='-y'
-epireg.inputs.output_type='NIFTI_GZ'
+#epireg = pe.Node(interface=fsl.epi.EpiReg(), name='epireg')
+#epireg.inputs.echospacing=0.00046
+#epireg.inputs.pedir='-y'
+#epireg.inputs.output_type='NIFTI_GZ'
+
+# White Matter Segmentation (Make sure to generate edge map)
+segment=pe.Node(interface=fsl.FAST(),name='segment')
+
+wmbinmap=
+#fast -o opname_fast anat_ss
+#fslmaths opname_fast_pve_2 -thr 0.5 -bin opname_fast_wmseg
+#fslmaths opname_fast_wmseg -edge -bin -mas opname_fast_wmseg opname_fast_wmedge
+
+# Flirt Pre-Alignment, using skullstripped T1 as reference
+#flirt -ref anat_ss -in epi -dof 6 -omat opname_init.mat
+
+# Register Field Map to Structural
+#flirt -in fmap_mag_ss -ref anat_ss -dof 6 -omat opname_fieldmap2str_init.mat
+#flirt -in fmap_mag -ref anat -dof 6 -init opname_fieldmap2str_init.mat -omat opname_fieldmap2str.mat -out opname_fieldmap2str -nosearch
+
+# Unmask the Field Map
+#fslmaths fmap_mag_ss -abs -bin ${vout}_fieldmaprads_mask
+#fslmaths fmap_prep -abs -bin -mul opname_fieldmaprads_mask opname_fieldmaprads_mask
+#fugue --loadfmap=fmap_prep --mask=opname_fieldmaprads_mask --unmaskfmap --savefmap=$opname_fieldmaprads_unmasked --unwarpdir=-y # the direction here should take into account the initial affine (it needs to be the direction in the EPI)
+	
+# NEW HACK to fix extrapolation when fieldmap is too small
+applywarp -i opname_fieldmaprads_unmasked -r anat_ss --premat=opname_fieldmap2str.mat -o opname_fieldmaprads2str_pad0
+fslmaths opname_fieldmaprads2str_pad0 -abs -bin opname_fieldmaprads2str_innermask
+fugue --loadfmap=opname_fieldmaprads2str_pad0 --mask=opname_fieldmaprads2str_innermask --unmaskfmap --unwarpdir=y- --savefmap=opname_fieldmaprads2str_dilated
+fslmaths opname_fieldmaprads2str_dilated opname_fieldmaprads2str
+
+# run bbr with fieldmap
+if [ $use_weighting = yes ] ; then wopt="-refweight $refweight"; else wopt=""; fi
+flirt -ref anat_ss -in msit -dof 6 -cost bbr -wmseg opname_fast_wmseg -init opname_init.mat -omat opname.mat -out opname_1vol -schedule bbr.sch -echospacing ${dwell} -pedir y- -fieldmap opname_fieldmaprads2str $wopt
+
+
+# Making warp fields and applying registration to EPI series
+convert_xfm -omat opname_inv.mat -inverse opname.mat
+convert_xfm -omat opname_fieldmaprads2epi.mat -concat opname_inv.mat opname_fieldmap2str.mat
+applywarp -i opname_fieldmaprads_unmasked -r msit --premat=opname_fieldmaprads2epi.mat -o opname_fieldmaprads2epi
+fslmaths opname_fieldmaprads2epi -abs -bin opname_fieldmaprads2epi_mask
+fugue --loadfmap=opname_fieldmaprads2epi --mask=opname_fieldmaprads2epi_mask --saveshift=opname_fieldmaprads2epi_shift --unmaskshift --dwell=${dwell} --unwarpdir=-y
+convertwarp -r anat_ss -s opname_fieldmaprads2epi_shift --postmat=opname.mat -o opname_warp --shiftdir=y- --relout
+applywarp -i msit -r anat_ss -o opname -w opname_warp --interp=spline --rel
+
 
 
 ## Connect nodes and run workflow
