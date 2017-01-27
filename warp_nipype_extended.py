@@ -61,11 +61,22 @@ prepare.inputs.delta_TE = 2.46
 
 # White Matter Segmentation (Make sure to generate edge map)
 segment=pe.Node(interface=fsl.FAST(),name='segment')
-
-wmbinmap=
 #fast -o opname_fast anat_ss
+
+
+wmmapbin = pe.Node(interface=fsl.UnaryMaths(),name='wmmapbin')
 #fslmaths opname_fast_pve_2 -thr 0.5 -bin opname_fast_wmseg
+# in_file -> out_file
+wmmapbin.inputs.args='-thr 0.5 -bin'
+
+wmmapedge = pe.Node(interface=fsl.MultiImageMaths(),name='wmmapbin')
 #fslmaths opname_fast_wmseg -edge -bin -mas opname_fast_wmseg opname_fast_wmedge
+wmmapedge.inputs.op_string='-edge -bin -mas %s'
+
+
+
+
+
 
 # Flirt Pre-Alignment, using skullstripped T1 as reference
 #flirt -ref anat_ss -in epi -dof 6 -omat opname_init.mat
